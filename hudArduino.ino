@@ -1,9 +1,16 @@
 #include "DFRobot_DS323X.h"
+#include <mcp_can.h>
+#include <SPI.h>
 
 DFRobot_DS323X rtc;
 
+
+MCP_CAN CAN0(10);                               // Set CS to pin 10
+
 unsigned int firstPage=1;
 unsigned int page=1;
+
+
 String getTime(){
     // Extract hour and minute
   unsigned char hour = rtc.getHour();
@@ -13,6 +20,12 @@ String getTime(){
   sprintf(buffer, "%02d:%02d", hour, minute);
 
   return String(buffer);
+}
+
+void serialFlush() {
+  while (Serial.available() > 0) {
+    Serial.read();
+  }
 }
 
 int getPageID() {
@@ -70,10 +83,7 @@ unsigned int minuteDec(unsigned int currentTime ){
 }
 void welcomePage(int loading){
   delay(loading);
-  Serial.print("page "+ String(firstPage));
-  Serial.write(0xFF);
-  Serial.write(0xFF);
-  Serial.write(0xFF);
+  gotoPage(firstPage);
   page=firstPage;
 }
 void sendText(char caption[],String text){
@@ -153,29 +163,41 @@ void btnEvent(int currPage){
 }
 void viewPage(){
   switch (page){
-  case 1:
-  pageDaylight();
-  btnEvent(page);
-  break;
-  case 2:
-  break;
-  case 3: //page setting
-  pageSetting();
-  btnEvent(page);
-  break;
-  case 4: //page time setting
-  pageTimeSet();
-  btnEvent(page);
-  break;
-  case 5: //page brightness setting
-  break;
+    case 1:
+    pageDaylight();
+    btnEvent(page);
+    break;
+    case 2:
+    break;
+    case 3: //page setting
+    pageSetting();
+    btnEvent(page);
+    break;
+    case 4: //page time setting
+    pageTimeSet();
+    btnEvent(page);
+    break;
+    case 5: //page brightness setting
+    break;
+  }
 }
-}
+
 void pageTimeSet(){
   sendText("t5",String(rtc.getHour()));
   sendText("t2",String(rtc.getMinute()));
 }
 void pageDaylight(){
+  long unsigned int rxId;
+  unsigned char len = 0;
+  unsigned char rxBuf[8];
+  if (CAN0.checkReceive() == CAN_MSGAVAIL) {
+    CAN0.readMsgBuf(&rxId, &len, rxBuf);
+    if(rxId==0x100){
+      sendText("t8",String(rxBuf[0])+"%");
+      sendText("t9",String(rxBuf[1])+"%");
+      sendText("t10",String(rxBuf[2])+"C");
+    }
+  }
   sendText("t1",getTime());
 }
 
@@ -186,17 +208,17 @@ void pageSetting(){
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
-  while(rtc.begin() != true){
-      Serial.println("Failed to init chip, please check if the chip connection is fine. ");
-      delay(1000);
-  }
-  welcomePage(4000);
-  int pageNow = -1;
-  while (pageNow != 1) {
-    pageNow = getPageID();
-  }
-}
+  rtc.begin();
 
+  welcomePage(4000);
+
+      // Initialize MCP2515 running at 16MHz with a baudrate of 500kb/s and the masks and filters disabled.
+  if(CAN0.begin(MCP_ANY, CAN_500KBPS, MCP_8MHZ) != CAN_OK){
+    while(1);
+  }
+  CAN0.setMode(MCP_NORMAL);                     // Set operation mode to normal so the MCP2515 sends acks to received data.
+  serialFlush();
+}
 void loop() {
   viewPage();
 }
